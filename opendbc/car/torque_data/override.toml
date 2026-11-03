@@ -117,6 +117,10 @@ legend = ["LAT_ACCEL_FACTOR", "MAX_LAT_ACCEL_MEASURED", "FRICTION"]
 "KIA_K4_2025" = [2.5, 2.5, 0.1]
 "HYUNDAI_SANTA_CRUZ_2025" = [2.5, 2.5, 0.1]
 "HYUNDAI_IONIQ_5_N" = [2.5, 2.5, 0.005]
+# measured on a 2025 Tucson (NX4 MDPS C): ~30% less lateral accel per unit of torque than the 4th gen entry it used to
+# substitute, friction 0.06-0.13, hands-off lateral accel at full torque ~1.8-2.5 m/s^2 (the live learner is clipped
+# to +/-30% of these values and can only learn above 15 m/s)
+"HYUNDAI_TUCSON_2025" = [2.3, 2.5, 0.10]
 
 # Dashcam or fallback configured as ideal car
 "MOCK" = [10.0, 10, 0.0]

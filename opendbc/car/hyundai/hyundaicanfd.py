@@ -127,12 +127,20 @@ def create_lfahda_cluster(packer, CAN, enabled, lfa_icon):
 
 
 def create_ccnc_mdps(packer, CAN, mdps):
-  # report LKA torque inactive/unavailable so the camera LFA stays in standby
-  return packer.make_can_msg("MDPS", CAN.CAM, {**mdps, "MDPS_LkaToiActvSta": 0, "MDPS_LkaToiUnblSta": 1})
+  # report LKA torque inactive/unavailable so the camera LFA stays in standby.
+  # The copy is sent once per control frame while the EPS frames arrive in batches of 0-2 per frame, so the EPS counter
+  # is dropped and the packer's own counter keeps the camera-facing stream continuous
+  addr = packer.dbc.name_to_msg["MDPS"].address
+  if addr not in packer.counters:
+    # the panda forwards the real EPS frames until the first copy: continue their sequence
+    packer.counters[addr] = (int(mdps["COUNTER"]) + 1) % 256
+  values = {sig: val for sig, val in mdps.items() if sig != "COUNTER"}
+  values.update({"MDPS_LkaToiActvSta": 0, "MDPS_LkaToiUnblSta": 1})
+  return packer.make_can_msg("MDPS", CAN.CAM, values)
 
 
-def create_ccnc(packer, CAN, openpilot_longitudinal_control, enabled, hud, left_blinker, right_blinker, msg_161, msg_162, lead_distance,
-                is_metric, out, main_cruise_enabled, lfa_icon):
+def create_ccnc_161(packer, CAN, openpilot_longitudinal_control, enabled, hud, left_blinker, right_blinker, msg_161, is_metric, out,
+                    main_cruise_enabled, lfa_icon, has_bsm):
   # consider taking a break, with its chime
   if msg_161["ALERTS_2"] == 5:
     msg_161.update({"ALERTS_2": 0, "SOUNDS_2": 0})
@@ -148,22 +156,22 @@ def create_ccnc(packer, CAN, openpilot_longitudinal_control, enabled, hud, left_
 
   LANE_CHANGE_SPEED_MIN = 8.9408  # 20 mph
   any_blinker = left_blinker or right_blinker
+  # LFA_ICON: 0 hidden, 1 gray (MADS paused), 2 green (steering), 3 white (disengaging); lane graphics only while steering
+  lat_active = lfa_icon == 2
+  lca_active = lat_active and has_bsm and out.vEgo >= LANE_CHANGE_SPEED_MIN
 
   msg_161.update({
     "DAW_ICON": 0,
     "LKA_ICON": 0,
-    "LFA_ICON": 2 if lfa_icon else 0,
-    "CENTERLINE": 1 if lfa_icon else 0,
-    "LANELINE_LEFT": (0 if not lfa_icon else 1 if not hud.leftLaneVisible else 4 if hud.leftLaneDepart else 6 if any_blinker else 2),
-    "LANELINE_RIGHT": (0 if not lfa_icon else 1 if not hud.rightLaneVisible else 4 if hud.rightLaneDepart else 6 if any_blinker else 2),
-    "LCA_LEFT_ICON": (0 if not lfa_icon or out.vEgo < LANE_CHANGE_SPEED_MIN else 1 if out.leftBlindspot else 2 if any_blinker else 4),
-    "LCA_RIGHT_ICON": (0 if not lfa_icon or out.vEgo < LANE_CHANGE_SPEED_MIN else 1 if out.rightBlindspot else 2 if any_blinker else 4),
+    "LFA_ICON": lfa_icon,
+    "CENTERLINE": 1 if lat_active else 0,
+    "LANELINE_LEFT": (0 if not lat_active else 1 if not hud.leftLaneVisible else 4 if hud.leftLaneDepart else 6 if any_blinker else 2),
+    "LANELINE_RIGHT": (0 if not lat_active else 1 if not hud.rightLaneVisible else 4 if hud.rightLaneDepart else 6 if any_blinker else 2),
+    "LCA_LEFT_ICON": (0 if not lca_active else 1 if out.leftBlindspot else 2 if any_blinker else 4),
+    "LCA_RIGHT_ICON": (0 if not lca_active else 1 if out.rightBlindspot else 2 if any_blinker else 4),
     "LCA_LEFT_ARROW": 2 if left_blinker else 0,
     "LCA_RIGHT_ARROW": 2 if right_blinker else 0,
   })
-
-  if hud.leftLaneDepart or hud.rightLaneDepart:
-    msg_162["VIBRATE"] = 1
 
   if openpilot_longitudinal_control:
     # 1/3 adjusting to speed limit, 2/4 set speed changed, 7-10 distance 1-4
@@ -192,10 +200,18 @@ def create_ccnc(packer, CAN, openpilot_longitudinal_control, enabled, hud, left_
       "TARGET": 0,
     })
 
+  return packer.make_can_msg("CCNC_0x161", CAN.ECAN, msg_161)
+
+
+def create_ccnc_162(packer, CAN, openpilot_longitudinal_control, enabled, hud, msg_162, lead_distance, main_cruise_enabled):
+  if hud.leftLaneDepart or hud.rightLaneDepart:
+    msg_162["VIBRATE"] = 1
+
+  if openpilot_longitudinal_control:
     msg_162["LEAD"] = (2 if enabled else 1) if main_cruise_enabled and hud.leadVisible else 0
     msg_162["LEAD_DISTANCE"] = lead_distance
 
-  return [packer.make_can_msg(msg, CAN.ECAN, data) for msg, data in [("CCNC_0x161", msg_161), ("CCNC_0x162", msg_162)]]
+  return packer.make_can_msg("CCNC_0x162", CAN.ECAN, msg_162)
 
 
 def create_acc_control(packer, CAN, enabled, accel_last, accel, stopping, gas_override, set_speed, hud_control,

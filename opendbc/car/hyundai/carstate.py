@@ -26,6 +26,14 @@ BUTTONS_DICT = {Buttons.RES_ACCEL: ButtonType.accelCruise, Buttons.SET_DECEL: Bu
                 Buttons.GAP_DIST: ButtonType.gapAdjustCruise, Buttons.CANCEL: ButtonType.cancel}
 
 
+def get_all_frames(cp: CANParser, msg: str) -> list[dict[str, float]]:
+  # one signal dict per frame of `msg` received in the last update, oldest first (empty until the first frame arrives)
+  _ = cp.vl[msg]  # registers the message in the parser on first use
+  vl_all = cp.vl_all[msg]
+  frames = min((len(vals) for vals in vl_all.values()), default=0)
+  return [{sig: vals[i] for sig, vals in vl_all.items()} for i in range(frames)]
+
+
 class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
   def __init__(self, CP, CP_SP):
     CarStateBase.__init__(self, CP, CP_SP)
@@ -64,7 +72,9 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
     self.buttons_counter = 0
 
     self.cruise_info = {}
-    self.msg_161, self.msg_162, self.mdps = {}, {}, {}
+    self.mdps = {}
+    self.msg_161_frames: list[dict[str, float]] = []
+    self.msg_162_frames: list[dict[str, float]] = []
 
     # On some cars, CLU15->CF_Clu_VehicleSpeed can oscillate faster than the dash updates. Sample at 5 Hz
     self.cluster_speed = 0
@@ -254,7 +264,10 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
     ret.steeringAngleDeg = cp.vl["STEERING_SENSORS"]["STEERING_ANGLE"]
     ret.steeringTorque = cp.vl["MDPS"]["MDPS_StrTqSnsrVal"]
     ret.steeringTorqueEps = cp.vl["MDPS"]["MDPS_OutTqVal"]
-    ret.steeringPressed = self.update_steering_pressed(abs(ret.steeringTorque) > self.params.STEER_THRESHOLD, 5)
+    # CCNC: hands resting on the wheel hover around the threshold and flicker the override state (~35% of override
+    # episodes last < 0.35 s with no steering intent); a 100 ms debounce removes the flicker without losing real overrides
+    steering_pressed_min_count = 10 if self.CP.flags & HyundaiFlags.CCNC else 5
+    ret.steeringPressed = self.update_steering_pressed(abs(ret.steeringTorque) > self.params.STEER_THRESHOLD, steering_pressed_min_count)
     ret.steerFaultTemporary = cp.vl["MDPS"]["MDPS_LkaFailSta"] != 0
 
     # TODO: alt signal usage may be described by cp.vl['BLINKERS']['USE_ALT_LAMP']
@@ -262,7 +275,9 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
     if self.CP.flags & HyundaiFlags.CCNC:
       left_blinker_sig, right_blinker_sig = "LEFT_LAMP_ALT", "RIGHT_LAMP_ALT"
       if not self.CP.flags & HyundaiFlags.CANFD_LKA_STEER_MSG:
-        self.msg_161, self.msg_162 = map(copy.copy, (cp_cam.vl["CCNC_0x161"], cp_cam.vl["CCNC_0x162"]))
+        # every camera frame is forwarded once, so the cluster sees the camera's own counter sequence
+        self.msg_161_frames = get_all_frames(cp_cam, "CCNC_0x161")
+        self.msg_162_frames = get_all_frames(cp_cam, "CCNC_0x162")
         self.mdps = copy.copy(cp.vl["MDPS"]) if cp.ts_nanos["MDPS"]["COUNTER"] else {}  # never copy before the real one arrived
         self.cruise_info = copy.copy((cp_cam if self.CP.flags & HyundaiFlags.CANFD_CAMERA_SCC else cp).vl["SCC_CONTROL"])
     ret.leftBlinker, ret.rightBlinker = self.update_blinker_from_lamp(50, cp.vl["BLINKERS"][left_blinker_sig],
@@ -282,7 +297,9 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
       cp_cruise_info = cp_cam if self.CP.flags & HyundaiFlags.CANFD_CAMERA_SCC else cp
       ret.cruiseState.enabled = cp_cruise_info.vl["SCC_CONTROL"]["ACCMode"] in (1, 2)
       ret.cruiseState.standstill = cp_cruise_info.vl["SCC_CONTROL"]["CRUISE_STANDSTILL"] == 1
-      ret.cruiseState.speed = cp_cruise_info.vl["SCC_CONTROL"]["VSetDis"] * speed_factor
+      # 255 is the DBC's "no set speed" value; 0 is openpilot's
+      set_speed = cp_cruise_info.vl["SCC_CONTROL"]["VSetDis"]
+      ret.cruiseState.speed = 0 if set_speed == 255 else set_speed * speed_factor
       self.cruise_info = copy.copy(cp_cruise_info.vl["SCC_CONTROL"])
 
     # Manual Speed Limit Assist is a feature that replaces non-adaptive cruise control on EV CAN FD platforms.

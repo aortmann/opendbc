@@ -210,17 +210,22 @@ class CarController(CarControllerBase, EsccCarController, LeadDataCarController,
       can_sends.append(hyundaicanfd.create_suppress_lfa(self.packer, self.CAN, CS.lfa_block_msg,
                                                         self.CP.flags & HyundaiFlags.CANFD_LKA_STEER_MSG_ALT))
 
-    if ccnc_non_hda2 and CS.mdps:
-      can_sends.append(hyundaicanfd.create_ccnc_mdps(self.packer, self.CAN, CS.mdps))
+    if ccnc_non_hda2:
+      if CS.mdps:
+        can_sends.append(hyundaicanfd.create_ccnc_mdps(self.packer, self.CAN, CS.mdps))
+
+      # cluster messages: one copy per camera frame received, so the counters stay continuous at the camera's cadence
+      for msg_161 in CS.msg_161_frames:
+        can_sends.append(hyundaicanfd.create_ccnc_161(self.packer, self.CAN, self.CP.openpilotLongitudinalControl, CC.enabled, CC.hudControl,
+                                                      CC.leftBlinker, CC.rightBlinker, msg_161, CS.is_metric, CS.out, CS.main_cruise_enabled, self.lfa_icon,
+                                                      bool(self.CP.flags & HyundaiFlags.HAS_BSM)))
+      for msg_162 in CS.msg_162_frames:
+        can_sends.append(hyundaicanfd.create_ccnc_162(self.packer, self.CAN, self.CP.openpilotLongitudinalControl, CC.enabled, CC.hudControl, msg_162,
+                                                      self.lead_distance, CS.main_cruise_enabled))
 
     # LFA and HDA icons
-    if self.frame % 5 == 0 and (not lka_steering or lka_steering_long):
-      if ccnc_non_hda2:
-        can_sends.extend(hyundaicanfd.create_ccnc(self.packer, self.CAN, self.CP.openpilotLongitudinalControl, CC.enabled, CC.hudControl, CC.leftBlinker,
-                                                  CC.rightBlinker, CS.msg_161, CS.msg_162, self.lead_distance, CS.is_metric, CS.out, CS.main_cruise_enabled,
-                                                  self.lfa_icon))
-      else:
-        can_sends.append(hyundaicanfd.create_lfahda_cluster(self.packer, self.CAN, CC.enabled, self.lfa_icon))
+    elif self.frame % 5 == 0 and (not lka_steering or lka_steering_long):
+      can_sends.append(hyundaicanfd.create_lfahda_cluster(self.packer, self.CAN, CC.enabled, self.lfa_icon))
 
     # blinkers
     if lka_steering and self.CP.flags & HyundaiFlags.CANFD_ENABLE_BLINKERS:

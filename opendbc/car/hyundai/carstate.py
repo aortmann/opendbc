@@ -26,14 +26,6 @@ BUTTONS_DICT = {Buttons.RES_ACCEL: ButtonType.accelCruise, Buttons.SET_DECEL: Bu
                 Buttons.GAP_DIST: ButtonType.gapAdjustCruise, Buttons.CANCEL: ButtonType.cancel}
 
 
-def get_all_frames(cp: CANParser, msg: str) -> list[dict[str, float]]:
-  # one signal dict per frame of `msg` received in the last update, oldest first (empty until the first frame arrives)
-  _ = cp.vl[msg]  # registers the message in the parser on first use
-  vl_all = cp.vl_all[msg]
-  frames = min((len(vals) for vals in vl_all.values()), default=0)
-  return [{sig: vals[i] for sig, vals in vl_all.items()} for i in range(frames)]
-
-
 class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
   def __init__(self, CP, CP_SP):
     CarStateBase.__init__(self, CP, CP_SP)
@@ -72,9 +64,6 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
     self.buttons_counter = 0
 
     self.cruise_info = {}
-    self.mdps = {}
-    self.msg_161_frames: list[dict[str, float]] = []
-    self.msg_162_frames: list[dict[str, float]] = []
 
     # On some cars, CLU15->CF_Clu_VehicleSpeed can oscillate faster than the dash updates. Sample at 5 Hz
     self.cluster_speed = 0
@@ -266,20 +255,14 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
     ret.steeringTorqueEps = cp.vl["MDPS"]["MDPS_OutTqVal"]
     # CCNC: hands resting on the wheel hover around the threshold and flicker the override state (~35% of override
     # episodes last < 0.35 s with no steering intent); a 100 ms debounce removes the flicker without losing real overrides
-    steering_pressed_min_count = 10 if self.CP.flags & HyundaiFlags.CCNC else 5
+    steering_pressed_min_count = 10 if self.CP_SP.flags & HyundaiFlagsSP.CCNC else 5
     ret.steeringPressed = self.update_steering_pressed(abs(ret.steeringTorque) > self.params.STEER_THRESHOLD, steering_pressed_min_count)
     ret.steerFaultTemporary = cp.vl["MDPS"]["MDPS_LkaFailSta"] != 0
 
     # TODO: alt signal usage may be described by cp.vl['BLINKERS']['USE_ALT_LAMP']
     left_blinker_sig, right_blinker_sig = "LEFT_LAMP", "RIGHT_LAMP"
-    if self.CP.flags & HyundaiFlags.CCNC:
+    if self.CP.carFingerprint == CAR.HYUNDAI_KONA_EV_2ND_GEN or self.CP_SP.flags & HyundaiFlagsSP.CCNC:
       left_blinker_sig, right_blinker_sig = "LEFT_LAMP_ALT", "RIGHT_LAMP_ALT"
-      if not self.CP.flags & HyundaiFlags.CANFD_LKA_STEER_MSG:
-        # every camera frame is forwarded once, so the cluster sees the camera's own counter sequence
-        self.msg_161_frames = get_all_frames(cp_cam, "CCNC_0x161")
-        self.msg_162_frames = get_all_frames(cp_cam, "CCNC_0x162")
-        self.mdps = copy.copy(cp.vl["MDPS"]) if cp.ts_nanos["MDPS"]["COUNTER"] else {}  # never copy before the real one arrived
-        self.cruise_info = copy.copy((cp_cam if self.CP.flags & HyundaiFlags.CANFD_CAMERA_SCC else cp).vl["SCC_CONTROL"])
     ret.leftBlinker, ret.rightBlinker = self.update_blinker_from_lamp(50, cp.vl["BLINKERS"][left_blinker_sig],
                                                                       cp.vl["BLINKERS"][right_blinker_sig])
     if self.CP.flags & HyundaiFlags.HAS_BSM:

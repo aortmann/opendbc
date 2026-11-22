@@ -110,6 +110,15 @@ legend = ["LAT_ACCEL_FACTOR", "MAX_LAT_ACCEL_MEASURED", "FRICTION"]
 "ACURA_RDX_3G_MMR" = [1.5, 1.5, 0.16]
 "ACURA_ADX" = [1.5, 1.5, 0.22]
 "HONDA_PILOT_4G_MMR" = [2.0, 2.0, 0.13]
+
+# Dashcam or fallback configured as ideal car
+"MOCK" = [10.0, 10, 0.0]
+
+# Manually checked
+"HONDA_CIVIC_2022" = [2.5, 1.2, 0.15]
+"HONDA_HRV_3G" = [2.5, 1.2, 0.2]
+
+# port extensions
 "HYUNDAI_KONA_2ND_GEN" = [2.5, 2.5, 0.1]
 "HYUNDAI_KONA_HEV_2ND_GEN" = [2.5, 2.5, 0.1]
 "KIA_SORENTO_2024" = [2.5, 2.5, 0.1]
@@ -121,14 +130,5 @@ legend = ["LAT_ACCEL_FACTOR", "MAX_LAT_ACCEL_MEASURED", "FRICTION"]
 # substitute, friction 0.06-0.13, hands-off lateral accel at full torque ~1.8-2.5 m/s^2 (the live learner is clipped
 # to +/-30% of these values and can only learn above 15 m/s)
 "HYUNDAI_TUCSON_2025" = [2.3, 2.5, 0.10]
-
-# Dashcam or fallback configured as ideal car
-"MOCK" = [10.0, 10, 0.0]
-
-# Manually checked
-"HONDA_CIVIC_2022" = [2.5, 1.2, 0.15]
-"HONDA_HRV_3G" = [2.5, 1.2, 0.2]
-
-# port extensions
 "HONDA_CLARITY" = [0.96, 0.4018518740819229, 0.19]
 "CHEVROLET_MALIBU_NON_ACC_9TH_GEN" = [1.85, 1.85, 0.075]
